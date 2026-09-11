@@ -8,7 +8,7 @@ SP611E (BanlanX) Bluetooth Low Energy (BLE) RGB LED kontrolcüsü için komut sa
 - 🎨 **Statik Renk (`color`)**: İsim, hex veya RGB bileşenleri; cihazı otomatik olarak statik moda alır.
 - 🌈 **Dinamik Efekt (`effect`)** ve ⏩ **Hız (`speed`)**: 1-255 efekt ID, 1-10 hız.
 - 🧩 **Toplu Ayar (`set` / kök kısayol)**: `sp611e --color red --brightness 10` gibi birden fazla ayarı tek BLE bağlantısında uygular.
-- 🔗 **OpenRGB Senkronu (`openrgb`)**: OpenRGB SDK üzerinden seçilen cihazın rengini şeride canlı aynalar (kalıcı BLE bağlantısı, değişiklik bazlı gönderim).
+- 🔗 **OpenRGB Senkronu (`openrgb`)**: OpenRGB SDK üzerinden seçilen cihazın rengini şeride canlı aynalar (kalıcı BLE bağlantısı, değişiklik bazlı gönderim). Kayıtlı varsayılanlar (`--save`), arka plan modu (`--background` / `--stop` / `--status`) ve Windows oturum açılışında otomatik başlatma (`--install-startup`).
 - 🖥️ **Web Dashboard (`gui`)**: Tarayıcıda renk stüdyosu, parlaklık, efekt ve hız kontrolleri; BLE tarayıcı modalı.
 - ⚙️ **Konfigürasyon (`config`)** ve 📜 **Loglar (`logs`)**: `~/.sp611e/` altında varsayılan MAC ve debug logu.
 - 📦 **Tek dosya `.exe`**: PyInstaller ile Python gerektirmeyen taşınabilir çalıştırılabilir (bkz. Kurulum A).
@@ -298,10 +298,67 @@ MAC verilmediği için `sp611e config --set-mac` ile kaydedilen varsayılan adre
 | `--fps` | `10` | OpenRGB sorgulama sıklığı (Hz). Bu değer aynı zamanda BLE'ye gidebilecek azami güncelleme hızıdır. SP611E pratikte ~15'ten hızlısını uygulayamaz; efektlerde 10-15 yeterlidir. Statik renkte fps'nin önemi yoktur (aynı renk tekrar gönderilmez). |
 | `--brightness`, `-b` | `255` | Şeridin parlaklığı: `0-255` veya yüzde (`60%`). OpenRGB'de parlaklık kavramı olmadığı için burada sabitlenir; `A0 69 04 R G B L` karesindeki `L` baytına yazılır. |
 | `--idle-timeout` | `30` | Renk bu kadar saniye değişmezse BLE bağlantısı bırakılır; böylece telefon/CLI cihaza erişebilir. Renk yeniden değişince otomatik bağlanır (bağlantı 1-4 sn sürer). `0` = bağlantıyı asla bırakma (en düşük gecikme). |
-| `--no-power-on` | kapalı | Normalde her BLE bağlantısında önce `A0 62 01 01` (aç) gönderilir; bu bayrak ile atlanır. Şeridi OpenRGB'den bağımsız kapalı tutmak isterseniz kullanın. |
+| `--power-on` / `--no-power-on` | `--power-on` | Normalde her BLE bağlantısında önce `A0 62 01 01` (aç) gönderilir; `--no-power-on` ile atlanır. Şeridi OpenRGB'den bağımsız kapalı tutmak isterseniz kullanın. |
+| `--save` | — | Verilen seçenekleri `config.toml` `[openrgb]` bölümüne **varsayılan** olarak kaydeder ve çıkar (bkz. aşağıda). |
+| `--background` | — | Köprüyü penceresiz bir **arka plan süreci** olarak başlatır ve terminale döner. |
+| `--stop` | — | Arka planda çalışan köprüyü zarifçe durdurur (BLE bağlantısı düzgün kapatılır). |
+| `--status` | — | Arka plan köprüsü çalışıyor mu, otomatik başlatma kurulu mu, kayıtlı ve etkin ayarlar neler. |
+| `--install-startup` / `--uninstall-startup` | — | Windows oturum açılışında köprüyü otomatik başlatan Görev Zamanlayıcı görevini kurar / kaldırır. |
 | `--help` | — | Seçenek listesi. |
 
-Köprüyü durdurmak için **Ctrl+C**; kapanışta gönderilen kare sayısı yazdırılır ve BLE bağlantısı kapatılır.
+Ön planda çalışırken durdurmak için **Ctrl+C**; kapanışta gönderilen kare sayısı yazdırılır ve BLE bağlantısı kapatılır.
+
+#### Varsayılanları kaydetme (`--save`)
+
+Aynı seçenekleri her seferinde yazmamak için bir kez kaydedin; sonra `sp611e openrgb` tek başına yeter.
+Verilmeyen seçenekler şu sırayla çözülür: **komut satırı → `[openrgb]` config → yerleşik varsayılan**.
+
+```bash
+sp611e openrgb -d "ASUS Aura" -z "RGB Header" -b 12% --fps 15 --save
+sp611e openrgb                      # kayıtlı ayarlarla başlar
+sp611e openrgb -b 50%               # sadece parlaklığı bu seferlik değiştirir
+sp611e openrgb --pick first --save  # tek bir ayarı ekler/günceller, diğerleri korunur
+sp611e config                       # kayıtlı MAC ve [openrgb] ayarlarını gösterir
+```
+
+`config.toml` örneği:
+```toml
+[device]
+mac = "AA:BB:CC:DD:EE:FF"
+
+[openrgb]
+device = "ASUS Aura"
+zone = "RGB Header"
+brightness = 31
+fps = 15.0
+```
+
+#### Arka planda çalıştırma ve otomatik başlatma
+
+Terminal kapanınca köprünün de kapanmaması için arka plan modu:
+
+```bash
+sp611e openrgb --background     # penceresiz başlat, terminale dön
+sp611e openrgb --status         # çalışıyor mu? (PID, ayarlar, log yolu)
+sp611e openrgb --stop           # zarifçe durdur
+```
+
+- Arka plan süreci `~/.sp611e/openrgb.pid` dosyasını tutar; çıktısı `~/.sp611e/openrgb.out.log`'a, ayrıntılı log `sp611e.log`'a yazılır.
+- `--stop` PID dosyasını siler; köprü bunu fark edip BLE bağlantısını kapatarak çıkar (15 sn içinde çıkmazsa zorla sonlandırılır).
+- Aynı anda ikinci bir `--background` başlatılamaz (önce `--stop`).
+
+Windows oturum açılışında otomatik başlatmak için:
+
+```bash
+sp611e openrgb -d "ASUS Aura" -b 12% --save   # önce ayarları kaydedin (OpenRGB'de birden fazla cihaz varsa şart)
+sp611e openrgb --install-startup              # Görev Zamanlayıcı'ya "SP611E OpenRGB Bridge" görevi ekler
+sp611e openrgb --uninstall-startup            # kaldırır
+```
+
+- Görev, oturum açıldıktan 15 sn sonra `sp611e openrgb --background` çalıştırır; yönetici hakkı **gerekmez** (yalnızca kullanıcı oturum açıkken, normal yetkilerle).
+- OpenRGB'nin açılış sırası önemli değildir: köprü SDK sunucusunu bulana kadar 3 sn aralıkla dener.
+- Görev PATH'teki değil, komutu çalıştırdığınız `sp611e.exe`'nin (veya venv'in) tam yolunu kaydeder; exe'yi taşırsanız görevi yeniden kurun.
+- Görev başlarken ~0,3 sn'lik bir konsol penceresi belirip kaybolabilir; köprünün kendisi penceresizdir.
 
 Çalışma mantığı:
 - BLE bağlantısı **kalıcı** tutulur (her karede bağlan/kopar yapılmaz; bağlantı 1-4 sn sürer).

@@ -1,13 +1,20 @@
 """Command Line Interface (CLI) for SP611E BLE RGB LED controller."""
 
 import asyncio
+import os
 import sys
 from typing import Optional
 
 import click
 
 from sp611e_cli import __version__
-from sp611e_cli.config import get_config_path, get_default_mac, save_default_mac
+from sp611e_cli.config import (
+    get_config_path,
+    get_default_mac,
+    get_openrgb_defaults,
+    save_default_mac,
+    save_openrgb_defaults,
+)
 from sp611e_cli.device import (
     SP611ECommandError,
     SP611EConnectionError,
@@ -620,6 +627,12 @@ def cmd_config(set_mac: Optional[str], show: bool) -> None:
         click.secho("Kayıtlı varsayılan MAC adresi bulunamadı.", fg="yellow")
         click.echo("Kaydetmek için: sp611e config --set-mac <MAC>")
 
+    openrgb_defaults = get_openrgb_defaults()
+    if openrgb_defaults:
+        click.secho("[openrgb] varsayılanları: " + ", ".join(f"{k}={v}" for k, v in openrgb_defaults.items()), fg="cyan")
+    else:
+        click.echo("[openrgb] varsayılanı yok (kaydetmek için: sp611e openrgb ... --save)")
+
 
 @main.command("gui")
 @click.option(
@@ -658,42 +671,100 @@ def cmd_gui(port: int, host: str, no_browser: bool) -> None:
         sys.exit(1)
 
 
+OPENRGB_BUILTIN_DEFAULTS = {
+    "host": "127.0.0.1",
+    "port": 6742,
+    "device": None,
+    "zone": None,
+    "pick": "avg",
+    "fps": 10.0,
+    "brightness": 255,
+    "idle_timeout": 30.0,
+    "power_on": True,
+}
+
+
+def _resolve_openrgb_settings(cli_values: dict) -> dict:
+    """Effective settings = CLI value, else [openrgb] config, else built-in default."""
+    saved = get_openrgb_defaults()
+    effective = {}
+    for key, builtin in OPENRGB_BUILTIN_DEFAULTS.items():
+        value = cli_values.get(key)
+        if value is None:
+            value = saved.get(key, builtin)
+        effective[key] = value
+    return effective
+
+
+async def _run_bridge_with_stop_watch(bridge, pid: int) -> None:
+    """Run the bridge; stop it gracefully when the PID file disappears (sp611e openrgb --stop)."""
+    from sp611e_cli.background import stop_requested
+
+    async def _watch() -> None:
+        while not stop_requested(pid):
+            await asyncio.sleep(0.5)
+        bridge.stop()
+
+    watcher = asyncio.create_task(_watch())
+    try:
+        await bridge.run()
+    finally:
+        watcher.cancel()
+
+
 @main.command("openrgb")
 @click.option("--mac", "-m", default=None, help="Hedef SP611E cihazının Bluetooth MAC adresi.")
-@click.option("--host", default="127.0.0.1", show_default=True, help="OpenRGB SDK sunucu adresi.")
-@click.option("--port", type=int, default=6742, show_default=True, help="OpenRGB SDK sunucu portu.")
+@click.option("--host", default=None, help="OpenRGB SDK sunucu adresi.  [varsayılan: 127.0.0.1]")
+@click.option("--port", type=int, default=None, help="OpenRGB SDK sunucu portu.  [varsayılan: 6742]")
 @click.option("--device", "-d", default=None, metavar="NAME|INDEX", help="Takip edilecek OpenRGB cihazı (ad parçası veya indeks). Tek cihaz varsa gerekmez.")
 @click.option("--zone", "-z", default=None, metavar="NAME|INDEX", help="Sadece bu zone'u takip et (ad parçası veya indeks).")
-@click.option("--pick", default="avg", show_default=True, metavar="avg|first|brightest|N", help="LED'lerden tek renk seçme yöntemi (N = LED indeksi).")
-@click.option("--fps", type=float, default=10.0, show_default=True, help="OpenRGB'yi saniyede kaç kez sorgula (BLE üst sınırı ~15).")
-@click.option("--brightness", "-b", default="255", metavar="LEVEL", help="Şeride uygulanacak parlaklık: 0-255 veya yüzde ('80%').")
-@click.option("--idle-timeout", type=float, default=30.0, show_default=True, help="Renk bu kadar saniye değişmezse BLE bağlantısını bırak (0 = hiç bırakma).")
-@click.option("--no-power-on", is_flag=True, default=False, help="Bağlanınca cihazı açma komutu gönderme.")
+@click.option("--pick", default=None, metavar="avg|first|brightest|N", help="LED'lerden tek renk seçme yöntemi (N = LED indeksi).  [varsayılan: avg]")
+@click.option("--fps", type=float, default=None, help="OpenRGB'yi saniyede kaç kez sorgula (BLE üst sınırı ~15).  [varsayılan: 10]")
+@click.option("--brightness", "-b", default=None, metavar="LEVEL", help="Şeride uygulanacak parlaklık: 0-255 veya yüzde ('80%').  [varsayılan: 255]")
+@click.option("--idle-timeout", type=float, default=None, help="Renk bu kadar saniye değişmezse BLE bağlantısını bırak (0 = hiç bırakma).  [varsayılan: 30]")
+@click.option("--power-on/--no-power-on", default=None, help="Bağlanınca cihazı açma komutu gönder / gönderme.  [varsayılan: gönder]")
+@click.option("--save", is_flag=True, default=False, help="Verilen seçenekleri ~/.sp611e/config.toml [openrgb] bölümüne varsayılan olarak kaydet ve çık.")
 @click.option("--list", "list_only", is_flag=True, default=False, help="OpenRGB cihaz/zone listesini göster ve çık.")
+@click.option("--background", is_flag=True, default=False, help="Köprüyü penceresiz bir arka plan süreci olarak başlat ve terminale dön.")
+@click.option("--stop", is_flag=True, default=False, help="Arka planda çalışan köprüyü durdur.")
+@click.option("--status", is_flag=True, default=False, help="Arka plan köprüsü, otomatik başlatma ve kayıtlı ayarların durumunu göster.")
+@click.option("--install-startup", is_flag=True, default=False, help="Windows oturum açılışında köprüyü otomatik başlat (Görev Zamanlayıcı).")
+@click.option("--uninstall-startup", is_flag=True, default=False, help="Otomatik başlatma görevini kaldır.")
 @click.pass_context
 def cmd_openrgb(
     ctx: click.Context,
     mac: Optional[str],
-    host: str,
-    port: int,
+    host: Optional[str],
+    port: Optional[int],
     device: Optional[str],
     zone: Optional[str],
-    pick: str,
-    fps: float,
-    brightness: str,
-    idle_timeout: float,
-    no_power_on: bool,
+    pick: Optional[str],
+    fps: Optional[float],
+    brightness: Optional[str],
+    idle_timeout: Optional[float],
+    power_on: Optional[bool],
+    save: bool,
     list_only: bool,
+    background: bool,
+    stop: bool,
+    status: bool,
+    install_startup: bool,
+    uninstall_startup: bool,
 ) -> None:
     """OpenRGB'deki bir cihazın rengini SP611E'ye canlı aynalar (SDK köprüsü).
 
-    OpenRGB'de Settings > SDK Server açık olmalıdır. Örnekler:
+    OpenRGB'de Settings > SDK Server açık olmalıdır. Verilmeyen seçenekler
+    config.toml [openrgb] bölümünden, o da yoksa varsayılanlardan alınır.
 
     \b
+    Örnekler:
       sp611e openrgb --list
-      sp611e openrgb --device "ASUS Aura"
-      sp611e openrgb -d 0 -z 1 --pick brightest -b 60%
+      sp611e openrgb -d "ASUS Aura" -z "RGB Header" -b 12% --save   # varsayılanları kaydet
+      sp611e openrgb --background                                    # arka planda başlat
+      sp611e openrgb --status / --stop
+      sp611e openrgb --install-startup                               # oturum açılışında başlat
     """
+    from sp611e_cli import background as bg
     from sp611e_cli.openrgb_bridge import (
         BridgeConfig,
         BridgeConfigError,
@@ -701,14 +772,97 @@ def cmd_openrgb(
         describe_devices,
     )
 
+    try:
+        level = parse_brightness_value(brightness) if brightness is not None else None
+    except ValueError as exc:
+        click.secho(f"Hata: {exc}", fg="red", err=True)
+        sys.exit(1)
+
+    cli_values = {
+        "host": host,
+        "port": port,
+        "device": device,
+        "zone": zone,
+        "pick": pick,
+        "fps": fps,
+        "brightness": level,
+        "idle_timeout": idle_timeout,
+        "power_on": power_on,
+    }
+    settings = _resolve_openrgb_settings(cli_values)
+
+    # --- management flags (no BLE) -----------------------------------------
+    if stop:
+        try:
+            pid = bg.stop_background()
+        except bg.BackgroundError as exc:
+            click.secho(f"Hata: {exc}", fg="red", err=True)
+            sys.exit(1)
+        if pid is None:
+            click.secho("Arka planda çalışan bir köprü yok.", fg="yellow")
+        else:
+            click.secho(f"✓ Arka plan köprüsü durduruldu (PID {pid}).", fg="green")
+        return
+
+    if status:
+        pid = bg.running_pid()
+        if pid is None:
+            click.secho("Arka plan köprüsü: çalışmıyor", fg="yellow")
+        else:
+            click.secho(f"Arka plan köprüsü: çalışıyor (PID {pid})", fg="green")
+        installed = bg.startup_installed()
+        click.echo(f"Oturum açılışında başlatma: {'kurulu' if installed else 'kurulu değil'}"
+                   + (f"  [{bg.STARTUP_TASK_NAME}]" if installed else ""))
+        saved = get_openrgb_defaults()
+        click.echo(f"Kayıtlı [openrgb] ayarları ({get_config_path()}): " + (", ".join(f"{k}={v}" for k, v in saved.items()) or "yok"))
+        click.echo("Etkin ayarlar: " + ", ".join(f"{k}={v}" for k, v in settings.items() if v is not None))
+        click.echo(f"Arka plan çıktı dosyası: {bg.OUTPUT_LOG}")
+        return
+
+    if uninstall_startup:
+        try:
+            removed = bg.uninstall_startup()
+        except bg.BackgroundError as exc:
+            click.secho(f"Hata: {exc}", fg="red", err=True)
+            sys.exit(1)
+        click.secho("✓ Otomatik başlatma görevi kaldırıldı." if removed else "Otomatik başlatma görevi zaten yok.",
+                    fg="green" if removed else "yellow")
+        return
+
+    if save:
+        try:
+            saved = save_openrgb_defaults(**cli_values)
+        except ValueError as exc:
+            click.secho(f"Hata: {exc}", fg="red", err=True)
+            sys.exit(1)
+        click.secho("✓ [openrgb] varsayılanları kaydedildi: " + (", ".join(f"{k}={v}" for k, v in saved.items()) or "(boş)"), fg="green")
+        click.echo(f"Yapılandırma dosyası: {get_config_path()}")
+        return
+
+    if install_startup:
+        if not get_default_mac():
+            click.secho("Hata: Önce varsayılan MAC kaydedin: sp611e config --set-mac <MAC>", fg="red", err=True)
+            sys.exit(1)
+        try:
+            task = bg.install_startup()
+        except bg.BackgroundError as exc:
+            click.secho(f"Hata: {exc}", fg="red", err=True)
+            sys.exit(1)
+        click.secho(f"✓ Oturum açılışında başlatma kuruldu: [{task}]", fg="green")
+        click.echo(f"  Çalıştırılacak komut: {bg.startup_command()}")
+        click.echo("  Köprü, kayıtlı [openrgb] ayarlarıyla (sp611e openrgb ... --save) başlar.")
+        if not get_openrgb_defaults():
+            click.secho("  Uyarı: Kayıtlı [openrgb] ayarı yok; OpenRGB'de tek cihaz yoksa köprü başlayamaz.", fg="yellow")
+        return
+
     if list_only:
         from openrgb import OpenRGBClient
 
         try:
-            client = OpenRGBClient(address=host, port=port, name="sp611e-bridge")
+            client = OpenRGBClient(address=settings["host"], port=settings["port"], name="sp611e-bridge")
         except OSError as exc:
             click.secho(
-                f"OpenRGB SDK sunucusuna bağlanılamadı ({host}:{port}): {exc}\n"
+                f"OpenRGB SDK sunucusuna bağlanılamadı ({settings['host']}:{settings['port']}): {exc}\n"
                 "OpenRGB açık ve Settings > SDK Server etkin mi?",
                 fg="red",
                 err=True,
@@ -720,28 +874,46 @@ def cmd_openrgb(
             client.disconnect()
         return
 
+    # --- run ---------------------------------------------------------------
     target_mac = resolve_mac(mac or ctx.obj.get("MAC"))
+
+    if background:
+        args = [a for a in sys.argv[1:] if a != "--background"]
+        try:
+            pid = bg.spawn_background(args)
+        except bg.BackgroundError as exc:
+            click.secho(f"Hata: {exc}", fg="red", err=True)
+            sys.exit(1)
+        click.secho(f"✓ Köprü arka planda başlatıldı (PID {pid}).", fg="green")
+        click.echo(f"  Durum: sp611e openrgb --status   Durdur: sp611e openrgb --stop   Çıktı: {bg.OUTPUT_LOG}")
+        return
+
     try:
-        level = parse_brightness_value(brightness)
-        config = BridgeConfig(
-            mac=target_mac,
-            host=host,
-            port=port,
-            device=device,
-            zone=zone,
-            pick=pick,
-            fps=fps,
-            brightness=level,
-            idle_timeout=idle_timeout,
-            power_on=not no_power_on,
-        )
-    except (ValueError, BridgeConfigError) as exc:
+        config = BridgeConfig(mac=target_mac, **settings)
+    except BridgeConfigError as exc:
         click.secho(f"Hata: {exc}", fg="red", err=True)
         sys.exit(1)
 
-    click.echo(f"OpenRGB köprüsü başlatılıyor: {host}:{port} -> SP611E {target_mac}")
-    click.echo("Durdurmak için Ctrl+C tuşlarına basın.\n")
+    click.echo(f"OpenRGB köprüsü başlatılıyor: {config.host}:{config.port} -> SP611E {target_mac}")
+    click.echo("Ayarlar: " + ", ".join(
+        f"{k}={v}" for k, v in settings.items() if k not in ("host", "port") and v is not None
+    ))
     bridge = OpenRGBBridge(config, status=lambda msg: click.secho(msg, fg="cyan"))
+
+    if bg.is_background_child():
+        pid = os.getpid()
+        bg.write_pid(pid)
+        try:
+            asyncio.run(_run_bridge_with_stop_watch(bridge, pid))
+            click.secho(f"Köprü durduruldu ({bridge.frames_sent} kare gönderildi).", fg="yellow")
+        except BridgeConfigError as exc:
+            click.secho(f"Hata: {exc}", fg="red", err=True)
+            sys.exit(1)
+        finally:
+            bg.remove_pid(pid)
+        return
+
+    click.echo("Durdurmak için Ctrl+C tuşlarına basın.\n")
     try:
         asyncio.run(bridge.run())
     except KeyboardInterrupt:

@@ -37,7 +37,7 @@ Piyasadaki kapalı kaynaklı ve yalnızca mobil cihazlarla sınırlı BanlanX ek
   - Kalıcı Varsayılan MAC Adresi Saklama (`~/.sp611e/config.toml`).
   - Dönen (Rotating) Hata Ayıklama Logları (`~/.sp611e/sp611e.log`).
   - İnteraktif Web Dashboard GUI (`sp611e gui`).
-  - OpenRGB SDK köprüsü (`sp611e openrgb`): OpenRGB cihazının rengini şeride canlı aynalama.
+  - OpenRGB SDK köprüsü (`sp611e openrgb`): OpenRGB cihazının rengini şeride canlı aynalama; kayıtlı varsayılanlar, arka plan süreci ve oturum açılışında otomatik başlatma.
 - **Teknik Kısıtlar:**
   - SP611E çipi aynı anda **yalnızca tek bir Bluetooth bağlantısını** destekler. Akıllı telefonda BanlanX uygulaması açıkken PC'den bağlantı kurulamaz.
   - BLE Service UUID: `0000ffe0-0000-1000-8000-00805f9b34fb`.
