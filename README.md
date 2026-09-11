@@ -268,15 +268,40 @@ sp611e openrgb -d 0 -z 1
 sp611e openrgb -d corsair --pick brightest -b 60% --fps 15
 ```
 
-| Seçenek | Açıklama |
+#### Örnek komutun parça parça açıklaması
+
+```bash
+sp611e openrgb -d "ASUS Aura" -z "RGB Header" --pick brightest -b 60% --fps 15
+```
+
+| Parça | Anlamı |
 |---|---|
-| `--device`, `-d` | Takip edilecek OpenRGB cihazı. Tek cihaz varsa gerekmez. |
-| `--zone`, `-z` | Sadece o cihazın bir zone'unu takip et. |
-| `--pick` | Çok LED'li kaynaktan tek renk türetme: `avg` (varsayılan, kanal ortalaması), `first`, `brightest` veya LED indeksi (`--pick 3`). |
-| `--fps` | OpenRGB sorgulama sıklığı. BLE tarafında pratik tavan ~15 kare/sn. |
-| `--brightness`, `-b` | Renk karesine katlanan parlaklık (0-255 veya `80%`). |
-| `--idle-timeout` | Renk bu kadar saniye değişmezse BLE bağlantısı bırakılır (varsayılan 30 s, `0` = hiç bırakma). |
-| `--no-power-on` | Bağlanınca `on` komutu gönderme. |
+| `-d "ASUS Aura"` | Adında "asus aura" geçen OpenRGB cihazını takip et (büyük/küçük harf duyarsız, ad parçası yeterli). |
+| `-z "RGB Header"` | O cihazın tamamını değil, yalnızca "RGB Header" zone'unu izle. |
+| `--pick brightest` | Zone'daki LED'ler arasından R+G+B toplamı en yüksek olanın rengini al. |
+| `-b 60%` | Şeride %60 (= 153/255) parlaklık uygula; renk kalitesini değil, RGB karesinin parlaklık baytını etkiler. |
+| `--fps 15` | OpenRGB'yi saniyede 15 kez sorgula → en fazla 15 renk güncellemesi/sn. |
+
+MAC verilmediği için `sp611e config --set-mac` ile kaydedilen varsayılan adres kullanılır.
+
+#### Tüm seçenekler
+
+| Seçenek | Varsayılan | Açıklama |
+|---|---|---|
+| `--list` | — | OpenRGB'nin gördüğü cihazları `[indeks] ad (LED sayısı)` ve altındaki zone'ları listeler, sonra çıkar. `-d`/`-z` değerlerini buradan seçin. BLE'ye dokunmaz, MAC gerekmez. |
+| `--mac`, `-m` | config'teki MAC | Hedef SP611E adresi. Verilmezse `~/.sp611e/config.toml` içindeki varsayılan kullanılır; o da yoksa hata. |
+| `--host` | `127.0.0.1` | OpenRGB SDK sunucusunun adresi. OpenRGB başka bir makinede çalışıyorsa onun IP'si. |
+| `--port` | `6742` | OpenRGB SDK sunucu portu (OpenRGB > Settings > SDK Server'daki değer). |
+| `--device`, `-d` | — | Takip edilecek cihaz. **İndeks** (`-d 0`) veya **ad parçası** (`-d aura`). Adda önce tam eşleşme, sonra kısmi eşleşme aranır; birden fazla cihaz eşleşirse liste ile hata verir. Verilmezse yalnızca OpenRGB'de **tek cihaz** varken çalışır. |
+| `--zone`, `-z` | tüm cihaz | Cihazın tek bir zone'unu izle. `-d` ile aynı kurallar: indeks veya ad parçası. Verilmezse cihazın bütün LED'leri kaynak alınır. |
+| `--pick` | `avg` | Çok LED'li kaynaktan tek renk türetme yöntemi:<br>• `avg` — her kanalın (R, G, B) ortalaması; gökkuşağı efektlerinde renkler karışabilir.<br>• `first` — kaynaktaki ilk LED'in rengi; dalga/koşan efektlerde net tek renk verir.<br>• `brightest` — R+G+B toplamı en yüksek LED.<br>• `N` (örn. `--pick 3`) — belirli LED indeksi; aralık dışıysa hata. |
+| `--fps` | `10` | OpenRGB sorgulama sıklığı (Hz). Bu değer aynı zamanda BLE'ye gidebilecek azami güncelleme hızıdır. SP611E pratikte ~15'ten hızlısını uygulayamaz; efektlerde 10-15 yeterlidir. Statik renkte fps'nin önemi yoktur (aynı renk tekrar gönderilmez). |
+| `--brightness`, `-b` | `255` | Şeridin parlaklığı: `0-255` veya yüzde (`60%`). OpenRGB'de parlaklık kavramı olmadığı için burada sabitlenir; `A0 69 04 R G B L` karesindeki `L` baytına yazılır. |
+| `--idle-timeout` | `30` | Renk bu kadar saniye değişmezse BLE bağlantısı bırakılır; böylece telefon/CLI cihaza erişebilir. Renk yeniden değişince otomatik bağlanır (bağlantı 1-4 sn sürer). `0` = bağlantıyı asla bırakma (en düşük gecikme). |
+| `--no-power-on` | kapalı | Normalde her BLE bağlantısında önce `A0 62 01 01` (aç) gönderilir; bu bayrak ile atlanır. Şeridi OpenRGB'den bağımsız kapalı tutmak isterseniz kullanın. |
+| `--help` | — | Seçenek listesi. |
+
+Köprüyü durdurmak için **Ctrl+C**; kapanışta gönderilen kare sayısı yazdırılır ve BLE bağlantısı kapatılır.
 
 Çalışma mantığı:
 - BLE bağlantısı **kalıcı** tutulur (her karede bağlan/kopar yapılmaz; bağlantı 1-4 sn sürer).
