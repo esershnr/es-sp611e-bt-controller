@@ -164,3 +164,27 @@ def test_startup_requires_windows(monkeypatch: pytest.MonkeyPatch) -> None:
     with pytest.raises(bg.BackgroundError, match="Windows"):
         bg.install_startup()
     assert bg.startup_installed() is False
+
+
+def test_spawn_strips_pyinstaller_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A onefile child must not inherit the parent's _MEI directory (deleted on parent exit)."""
+    monkeypatch.setenv("_PYI_APPLICATION_HOME_DIR", r"C:\Temp\_MEI123")
+    monkeypatch.setenv("_PYI_PARENT_PROCESS_LEVEL", "1")
+    monkeypatch.setenv("_MEIPASS2", r"C:\Temp\_MEI123")
+    seen = {}
+
+    class _Proc:
+        pid = 4242
+
+        def poll(self):
+            return 0
+
+    def _popen(cmd, **kwargs):
+        seen.update(kwargs["env"])
+        return _Proc()
+
+    monkeypatch.setattr(bg.subprocess, "Popen", _popen)
+    assert bg.spawn_background(["openrgb"]) == 4242
+    assert seen[bg.BACKGROUND_ENV] == "1"
+    for key in bg.PYINSTALLER_ENV_VARS:
+        assert key not in seen

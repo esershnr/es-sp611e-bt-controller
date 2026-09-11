@@ -31,6 +31,15 @@ STARTUP_TASK_NAME: str = "SP611E OpenRGB Bridge"
 # Set in the child's environment so it knows to maintain the PID file.
 BACKGROUND_ENV: str = "SP611E_BACKGROUND"
 
+# PyInstaller bootloader variables (6.x plus the legacy 4/5 name); see spawn_background().
+PYINSTALLER_ENV_VARS = (
+    "_PYI_APPLICATION_HOME_DIR",
+    "_PYI_ARCHIVE_FILE",
+    "_PYI_PARENT_PROCESS_LEVEL",
+    "_PYI_SPLASH_IPC",
+    "_MEIPASS2",
+)
+
 
 class BackgroundError(Exception):
     """Raised when a background/startup operation fails."""
@@ -131,6 +140,13 @@ def spawn_background(args: List[str]) -> int:
 
     CONFIG_DIR.mkdir(parents=True, exist_ok=True)
     env = dict(os.environ, **{BACKGROUND_ENV: "1"})
+    # PyInstaller onefile: the bootloader passes these to its own child so it
+    # reuses the extracted _MEIxxxx directory. If our detached child inherits
+    # them it shares *our* directory, which is deleted when this process exits
+    # and lazily-imported modules (e.g. winrt.*) then vanish from under it.
+    # Strip them so the child extracts its own copy.
+    for key in PYINSTALLER_ENV_VARS:
+        env.pop(key, None)
     kwargs: dict = {"stdin": subprocess.DEVNULL, "env": env, "close_fds": True}
     if sys.platform == "win32":
         kwargs["creationflags"] = subprocess.CREATE_NO_WINDOW | subprocess.CREATE_NEW_PROCESS_GROUP  # type: ignore[attr-defined]
