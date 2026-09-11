@@ -1,0 +1,44 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Distribution / packaging
+build/
+dist/
+*.egg-info/
+
+# Environments
+.venv/
+env/
+venv/
+ENV/
+
+# Pytest / coverage
+.pytest_cache/
+.coverage
+htmlcov/
+
+# IDE / Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Local editor/tooling directories (not part of the project)
+.agent/
+.agents/
+.claude/
+.codex/
+.gemini/
+.impeccable/
+.cursor/
+.windsurf/
+.aider*
+CLAUDE.local.md
+GEMINI.md
+AGENTS.md
+
+# Local runtime data (created by the app under the user's home, listed for safety)
+.sp611e/
+*.log

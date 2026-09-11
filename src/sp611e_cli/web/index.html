@@ -1,0 +1,279 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <title>SP611E Neo - BLE RGB LED Kontrolcü</title>
+  <meta name="description" content="SP611E BanlanX Bluetooth LE RGB LED kontrolcüsü için modern Web Dashboard.">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <!-- Ambient background glow reacting to LED color -->
+  <div id="ambient-glow" class="ambient-backdrop" aria-hidden="true"></div>
+
+  <div class="app-container">
+    <!-- Header -->
+    <header class="app-header glass-panel">
+      <div class="header-brand">
+        <div class="brand-icon-wrapper" aria-hidden="true">
+          <div class="brand-icon" id="brand-icon"></div>
+        </div>
+        <div>
+          <h1 class="brand-title">SP611E <span class="brand-highlight">NEO</span></h1>
+          <p class="brand-subtitle">Bluetooth LE RGB Controller Dashboard</p>
+        </div>
+      </div>
+
+      <div class="header-actions">
+        <div class="device-badge" id="device-badge">
+          <span class="status-indicator ready" id="status-indicator" aria-hidden="true"></span>
+          <span class="device-mac-label" id="active-mac-label">Bağlanıyor...</span>
+          <button type="button" class="btn-icon" id="btn-open-scanner" title="Cihaz Değiştir veya Tara" aria-label="Cihaz Değiştir veya Tara">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M12 20v-6M6 20V10M18 20V4"/>
+            </svg>
+          </button>
+        </div>
+
+        <button type="button" class="power-btn" id="power-toggle-btn" title="Cihazı Aç veya Kapat" aria-label="Cihaz Güç Düğmesi">
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M18.36 6.64a9 9 0 1 1-12.73 0"></path>
+            <line x1="12" y1="2" x2="12" y2="12"></line>
+          </svg>
+        </button>
+      </div>
+    </header>
+
+    <!-- LED Strip Virtual Live Simulation -->
+    <section class="live-strip-section glass-panel" aria-label="Canlı Işık Şeridi Simülatörü">
+      <div class="section-header-compact">
+        <h2 class="section-compact-title">Canlı LED Şerit Simülatörü</h2>
+        <span class="live-status-text" id="strip-status-text" aria-live="polite">Durum: Açık • Renk: #00F0FF</span>
+      </div>
+      <div class="led-strip-container" id="led-strip-container">
+        <div class="led-strip-track" id="led-strip-track" aria-hidden="true">
+          <!-- 24 individual LED diodes rendered via JS -->
+        </div>
+      </div>
+    </section>
+
+    <!-- Main Dashboard Grid -->
+    <main class="dashboard-grid">
+      <!-- Card 1: Color Studio -->
+      <section class="card glass-panel" id="color-card" aria-labelledby="heading-color-studio">
+        <div class="card-header">
+          <div class="card-title-group">
+            <span class="card-icon-svg" aria-hidden="true">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <circle cx="13.5" cy="6.5" r=".5" fill="currentColor"/>
+                <circle cx="17.5" cy="10.5" r=".5" fill="currentColor"/>
+                <circle cx="8.5" cy="7.5" r=".5" fill="currentColor"/>
+                <circle cx="6.5" cy="12.5" r=".5" fill="currentColor"/>
+                <path d="M12 2C6.5 2 2 6.5 2 12s4.5 10 10 10c.9 0 1.6-.7 1.6-1.6 0-.4-.2-.8-.5-1.1-.3-.3-.4-.7-.4-1.1 0-.9.7-1.6 1.6-1.6H16c3.3 0 6-2.7 6-6 0-5.5-4.5-10-10-10z"/>
+              </svg>
+            </span>
+            <h2 class="card-title" id="heading-color-studio">Renk Stüdyosu</h2>
+          </div>
+          <span class="badge-accent" id="hex-display">#00F0FF</span>
+        </div>
+
+        <div class="color-studio-form">
+          <div class="color-picker-hex-row">
+            <div class="native-picker-wrapper" id="picker-wrapper" title="Renk Paletini Aç">
+              <input type="color" id="native-color-picker" value="#00f0ff" aria-label="Renk Seçici Çarkı">
+              <div class="picker-preview" id="picker-preview" aria-hidden="true"></div>
+            </div>
+            <div class="input-field hex-field">
+              <label for="hex-input">HEX Kodu</label>
+              <input type="text" id="hex-input" value="#00F0FF" maxlength="7" autocomplete="off" spellcheck="false">
+            </div>
+          </div>
+          <div class="rgb-inputs-group">
+            <div class="input-field-mini">
+              <label for="rgb-r">Kırmızı (R)</label>
+              <input type="number" id="rgb-r" min="0" max="255" value="0">
+            </div>
+            <div class="input-field-mini">
+              <label for="rgb-g">Yeşil (G)</label>
+              <input type="number" id="rgb-g" min="0" max="255" value="240">
+            </div>
+            <div class="input-field-mini">
+              <label for="rgb-b">Mavi (B)</label>
+              <input type="number" id="rgb-b" min="0" max="255" value="255">
+            </div>
+          </div>
+          <button type="button" class="btn btn-primary btn-apply-color" id="btn-apply-color">Rengi Uygula</button>
+        </div>
+
+        <div class="preset-section">
+          <h3 class="subsection-title">Hazır Neon & Doğal Renkler</h3>
+          <div class="swatches-grid" id="swatches-grid" role="group" aria-label="Hazır Renk Paletleri">
+            <!-- Populated dynamically via JS -->
+          </div>
+        </div>
+      </section>
+
+      <!-- Card 2: Brightness Control -->
+      <section class="card glass-panel" id="brightness-card" aria-labelledby="heading-brightness">
+        <div class="card-header">
+          <div class="card-title-group">
+            <span class="card-icon-svg" aria-hidden="true">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <circle cx="12" cy="12" r="5"/>
+                <line x1="12" y1="1" x2="12" y2="3"/>
+                <line x1="12" y1="21" x2="12" y2="23"/>
+                <line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/>
+                <line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/>
+                <line x1="1" y1="12" x2="3" y2="12"/>
+                <line x1="21" y1="12" x2="23" y2="12"/>
+                <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/>
+                <line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/>
+              </svg>
+            </span>
+            <h2 class="card-title" id="heading-brightness">Parlaklık Seviyesi</h2>
+          </div>
+          <span class="badge-accent" id="brightness-display">100%</span>
+        </div>
+
+        <div class="brightness-slider-container">
+          <div class="slider-track-wrap">
+            <input type="range" id="brightness-slider" min="0" max="255" value="255" class="range-slider" aria-label="Parlaklık Ayarı 0 ile 255 arası">
+            <div class="slider-fill" id="brightness-slider-fill" aria-hidden="true"></div>
+          </div>
+          <div class="slider-meta">
+            <span>0 (Min)</span>
+            <span id="brightness-val-raw">255 / 255</span>
+            <span>255 (Maks)</span>
+          </div>
+        </div>
+
+        <div class="preset-buttons-row" role="group" aria-label="Hızlı Parlaklık Seviyeleri">
+          <button type="button" class="btn-preset" data-pct="10">10%</button>
+          <button type="button" class="btn-preset" data-pct="25">25%</button>
+          <button type="button" class="btn-preset" data-pct="50">50%</button>
+          <button type="button" class="btn-preset" data-pct="75">75%</button>
+          <button type="button" class="btn-preset active" data-pct="100">100%</button>
+        </div>
+      </section>
+
+      <!-- Card 3: Dynamic Effects Studio -->
+      <section class="card glass-panel" id="effect-card" aria-labelledby="heading-effects">
+        <div class="card-header">
+          <div class="card-title-group">
+            <span class="card-icon-svg" aria-hidden="true">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/>
+              </svg>
+            </span>
+            <h2 class="card-title" id="heading-effects">Dinamik Efektler</h2>
+          </div>
+          <span class="badge-accent" id="active-effect-display">Mod: Bilinmiyor</span>
+        </div>
+
+        <div class="effects-grid" id="effects-grid" role="group" aria-label="Hazır Efekt Modları">
+          <button type="button" class="effect-tile" data-id="1" aria-label="Gökkuşağı Akışı Efekti">
+            <div class="effect-tile-preview rainbow-wave" aria-hidden="true"></div>
+            <span class="effect-tile-name">Gökkuşağı Akışı</span>
+            <span class="effect-tile-id">#1</span>
+          </button>
+          <button type="button" class="effect-tile" data-id="2" aria-label="Neon Nabız Efekti">
+            <div class="effect-tile-preview pulse-glow" aria-hidden="true"></div>
+            <span class="effect-tile-name">Neon Nabız</span>
+            <span class="effect-tile-id">#2</span>
+          </button>
+          <button type="button" class="effect-tile" data-id="3" aria-label="Kuyruklu Yıldız Efekti">
+            <div class="effect-tile-preview chase-flow" aria-hidden="true"></div>
+            <span class="effect-tile-name">Kuyruklu Yıldız</span>
+            <span class="effect-tile-id">#3</span>
+          </button>
+          <button type="button" class="effect-tile" data-id="4" aria-label="Strobe Parıltı Efekti">
+            <div class="effect-tile-preview strobe-flash" aria-hidden="true"></div>
+            <span class="effect-tile-name">Strobe Parıltı</span>
+            <span class="effect-tile-id">#4</span>
+          </button>
+          <button type="button" class="effect-tile" data-id="5" aria-label="Ateş Dalgası Efekti">
+            <div class="effect-tile-preview fire-glow" aria-hidden="true"></div>
+            <span class="effect-tile-name">Ateş Dalgası</span>
+            <span class="effect-tile-id">#5</span>
+          </button>
+          <button type="button" class="effect-tile" data-id="10" aria-label="Siber Döngü Efekti">
+            <div class="effect-tile-preview cyber-loop" aria-hidden="true"></div>
+            <span class="effect-tile-name">Siber Döngü</span>
+            <span class="effect-tile-id">#10</span>
+          </button>
+        </div>
+
+        <!-- Direct Effect ID Input -->
+        <div class="custom-effect-row">
+          <div class="input-field">
+            <label for="custom-effect-id">Özel Efekt Numarası (1-255)</label>
+            <input type="number" id="custom-effect-id" min="1" max="255" value="1" placeholder="ID (1-255)">
+          </div>
+          <button type="button" class="btn btn-secondary" id="btn-apply-custom-effect">Efekti Başlat</button>
+        </div>
+
+        <!-- Speed Slider -->
+        <div class="speed-control-wrapper">
+          <div class="speed-header">
+            <label for="speed-slider" class="speed-label">Animasyon Hızı</label>
+            <span class="speed-val-badge" id="speed-display">8 / 10</span>
+          </div>
+          <div class="slider-track-wrap">
+            <input type="range" id="speed-slider" min="1" max="10" value="8" class="range-slider" aria-label="Efekt Oynatma Hızı 1 ile 10 arası">
+            <div class="slider-fill" id="speed-slider-fill" aria-hidden="true"></div>
+          </div>
+          <div class="slider-meta">
+            <span>1 (Yavaş)</span>
+            <span>5 (Normal)</span>
+            <span>10 (Ultra Hızlı)</span>
+          </div>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <!-- Scanner & Device Modal -->
+  <div class="modal-overlay" id="scanner-modal" role="dialog" aria-modal="true" aria-labelledby="modal-scanner-title">
+    <div class="modal-box glass-panel">
+      <div class="modal-header">
+        <h2 class="modal-title" id="modal-scanner-title">Bluetooth Cihaz Yönetimi</h2>
+        <button type="button" class="modal-close-btn" id="btn-close-scanner" aria-label="Pencereyi Kapat">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div class="current-mac-box">
+          <label for="manual-mac-input">Aktif MAC Adresi</label>
+          <div class="manual-mac-row">
+            <input type="text" id="manual-mac-input" placeholder="AA:BB:CC:DD:EE:FF" autocomplete="off" spellcheck="false">
+            <button type="button" class="btn btn-primary" id="btn-save-mac">Kaydet</button>
+          </div>
+        </div>
+
+        <div class="scanner-action-bar">
+          <button type="button" class="btn btn-scan" id="btn-start-scan">
+            <span class="scan-icon" id="scan-spinner" aria-hidden="true">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M4.93 4.93a10 10 0 0 1 14.14 0M7.76 7.76a6 6 0 0 1 8.48 0M10.59 10.59a2 2 0 0 1 2.82 0"/>
+                <line x1="12" y1="12" x2="12" y2="12.01"/>
+              </svg>
+            </span>
+            <span id="scan-btn-text">Yakındaki Cihazları Tara</span>
+          </button>
+        </div>
+
+        <div class="scan-results-container" id="scan-results-container">
+          <p class="scan-placeholder" id="scan-placeholder">Tarama başlatmak için yukarıdaki butona tıklayın.</p>
+          <div class="device-list" id="device-list" role="region" aria-live="polite"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Toast Notification Container -->
+  <div class="toast-container" id="toast-container" aria-live="polite" aria-atomic="true"></div>
+
+  <script src="app.js"></script>
+</body>
+</html>
