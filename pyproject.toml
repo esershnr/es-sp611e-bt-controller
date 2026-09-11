@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "sp611e-cli"
-version = "0.1.0"
+version = "1.1.0"
 description = "SP611E (BanlanX) Bluetooth LE RGB LED controller CLI tool"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -20,6 +20,7 @@ dependencies = [
     "aiohttp>=3.9.0",
     "bleak>=0.22.0",
     "click>=8.1.0",
+    "openrgb-python>=0.3.0",
 ]
 
 [project.optional-dependencies]

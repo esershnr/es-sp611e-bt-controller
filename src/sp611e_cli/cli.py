@@ -658,6 +658,102 @@ def cmd_gui(port: int, host: str, no_browser: bool) -> None:
         sys.exit(1)
 
 
+@main.command("openrgb")
+@click.option("--mac", "-m", default=None, help="Hedef SP611E cihazının Bluetooth MAC adresi.")
+@click.option("--host", default="127.0.0.1", show_default=True, help="OpenRGB SDK sunucu adresi.")
+@click.option("--port", type=int, default=6742, show_default=True, help="OpenRGB SDK sunucu portu.")
+@click.option("--device", "-d", default=None, metavar="NAME|INDEX", help="Takip edilecek OpenRGB cihazı (ad parçası veya indeks). Tek cihaz varsa gerekmez.")
+@click.option("--zone", "-z", default=None, metavar="NAME|INDEX", help="Sadece bu zone'u takip et (ad parçası veya indeks).")
+@click.option("--pick", default="avg", show_default=True, metavar="avg|first|brightest|N", help="LED'lerden tek renk seçme yöntemi (N = LED indeksi).")
+@click.option("--fps", type=float, default=10.0, show_default=True, help="OpenRGB'yi saniyede kaç kez sorgula (BLE üst sınırı ~15).")
+@click.option("--brightness", "-b", default="255", metavar="LEVEL", help="Şeride uygulanacak parlaklık: 0-255 veya yüzde ('80%').")
+@click.option("--idle-timeout", type=float, default=30.0, show_default=True, help="Renk bu kadar saniye değişmezse BLE bağlantısını bırak (0 = hiç bırakma).")
+@click.option("--no-power-on", is_flag=True, default=False, help="Bağlanınca cihazı açma komutu gönderme.")
+@click.option("--list", "list_only", is_flag=True, default=False, help="OpenRGB cihaz/zone listesini göster ve çık.")
+@click.pass_context
+def cmd_openrgb(
+    ctx: click.Context,
+    mac: Optional[str],
+    host: str,
+    port: int,
+    device: Optional[str],
+    zone: Optional[str],
+    pick: str,
+    fps: float,
+    brightness: str,
+    idle_timeout: float,
+    no_power_on: bool,
+    list_only: bool,
+) -> None:
+    """OpenRGB'deki bir cihazın rengini SP611E'ye canlı aynalar (SDK köprüsü).
+
+    OpenRGB'de Settings > SDK Server açık olmalıdır. Örnekler:
+
+    \b
+      sp611e openrgb --list
+      sp611e openrgb --device "ASUS Aura"
+      sp611e openrgb -d 0 -z 1 --pick brightest -b 60%
+    """
+    from sp611e_cli.openrgb_bridge import (
+        BridgeConfig,
+        BridgeConfigError,
+        OpenRGBBridge,
+        describe_devices,
+    )
+
+    if list_only:
+        from openrgb import OpenRGBClient
+
+        try:
+            client = OpenRGBClient(address=host, port=port, name="sp611e-bridge")
+        except OSError as exc:
+            click.secho(
+                f"OpenRGB SDK sunucusuna bağlanılamadı ({host}:{port}): {exc}\n"
+                "OpenRGB açık ve Settings > SDK Server etkin mi?",
+                fg="red",
+                err=True,
+            )
+            sys.exit(1)
+        try:
+            click.echo(describe_devices(client.devices))
+        finally:
+            client.disconnect()
+        return
+
+    target_mac = resolve_mac(mac or ctx.obj.get("MAC"))
+    try:
+        level = parse_brightness_value(brightness)
+        config = BridgeConfig(
+            mac=target_mac,
+            host=host,
+            port=port,
+            device=device,
+            zone=zone,
+            pick=pick,
+            fps=fps,
+            brightness=level,
+            idle_timeout=idle_timeout,
+            power_on=not no_power_on,
+        )
+    except (ValueError, BridgeConfigError) as exc:
+        click.secho(f"Hata: {exc}", fg="red", err=True)
+        sys.exit(1)
+
+    click.echo(f"OpenRGB köprüsü başlatılıyor: {host}:{port} -> SP611E {target_mac}")
+    click.echo("Durdurmak için Ctrl+C tuşlarına basın.\n")
+    bridge = OpenRGBBridge(config, status=lambda msg: click.secho(msg, fg="cyan"))
+    try:
+        asyncio.run(bridge.run())
+    except KeyboardInterrupt:
+        click.secho(f"\nKöprü durduruldu ({bridge.frames_sent} kare gönderildi).", fg="yellow")
+    except BridgeConfigError as exc:
+        click.secho(f"\nHata: {exc}", fg="red", err=True)
+        sys.exit(1)
+    except Exception as exc:
+        click.secho(f"\n[Beklenmeyen Hata] {exc}", fg="red", err=True)
+        sys.exit(1)
+
+
 @main.command("logs")
 @click.option(
     "--lines",

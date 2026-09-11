@@ -8,6 +8,7 @@ SP611E (BanlanX) Bluetooth Low Energy (BLE) RGB LED kontrolcüsü için komut sa
 - 🎨 **Statik Renk (`color`)**: İsim, hex veya RGB bileşenleri; cihazı otomatik olarak statik moda alır.
 - 🌈 **Dinamik Efekt (`effect`)** ve ⏩ **Hız (`speed`)**: 1-255 efekt ID, 1-10 hız.
 - 🧩 **Toplu Ayar (`set` / kök kısayol)**: `sp611e --color red --brightness 10` gibi birden fazla ayarı tek BLE bağlantısında uygular.
+- 🔗 **OpenRGB Senkronu (`openrgb`)**: OpenRGB SDK üzerinden seçilen cihazın rengini şeride canlı aynalar (kalıcı BLE bağlantısı, değişiklik bazlı gönderim).
 - 🖥️ **Web Dashboard (`gui`)**: Tarayıcıda renk stüdyosu, parlaklık, efekt ve hız kontrolleri; BLE tarayıcı modalı.
 - ⚙️ **Konfigürasyon (`config`)** ve 📜 **Loglar (`logs`)**: `~/.sp611e/` altında varsayılan MAC ve debug logu.
 - 📦 **Tek dosya `.exe`**: PyInstaller ile Python gerektirmeyen taşınabilir çalıştırılabilir (bkz. Kurulum A).
@@ -243,6 +244,49 @@ Farklı bir port veya host belirlemek isterseniz:
 ```bash
 sp611e gui --port 9000 --no-browser
 ```
+
+### 9. OpenRGB Senkronizasyonu (`openrgb`)
+
+OpenRGB'de görünen bir cihazın (anakart, RAM, klavye...) rengini SP611E şeridine canlı olarak aynalar.
+OpenRGB SDK'sı yeni cihaz kaydına izin vermediği için şerit OpenRGB listesinde görünmez; bunun yerine
+seçtiğiniz cihazı **takip eder**. OpenRGB Effects Plugin ile üretilen animasyonlar da bu yolla şeride yansır.
+
+Ön koşul: OpenRGB'de **Settings → SDK Server** etkin olmalı (varsayılan port 6742).
+
+```bash
+# OpenRGB'nin gördüğü cihazları ve zone'larını listele
+sp611e openrgb --list
+
+# Tek cihaz varsa doğrudan başlat
+sp611e openrgb
+
+# Belirli bir cihazı (ad parçası veya indeks) ve isteğe bağlı zone'u takip et
+sp611e openrgb --device "ASUS Aura" --zone "RGB Header"
+sp611e openrgb -d 0 -z 1
+
+# En parlak LED'i seç, şeride %60 parlaklık uygula, 15 Hz sorgula
+sp611e openrgb -d corsair --pick brightest -b 60% --fps 15
+```
+
+| Seçenek | Açıklama |
+|---|---|
+| `--device`, `-d` | Takip edilecek OpenRGB cihazı. Tek cihaz varsa gerekmez. |
+| `--zone`, `-z` | Sadece o cihazın bir zone'unu takip et. |
+| `--pick` | Çok LED'li kaynaktan tek renk türetme: `avg` (varsayılan, kanal ortalaması), `first`, `brightest` veya LED indeksi (`--pick 3`). |
+| `--fps` | OpenRGB sorgulama sıklığı. BLE tarafında pratik tavan ~15 kare/sn. |
+| `--brightness`, `-b` | Renk karesine katlanan parlaklık (0-255 veya `80%`). |
+| `--idle-timeout` | Renk bu kadar saniye değişmezse BLE bağlantısı bırakılır (varsayılan 30 s, `0` = hiç bırakma). |
+| `--no-power-on` | Bağlanınca `on` komutu gönderme. |
+
+Çalışma mantığı:
+- BLE bağlantısı **kalıcı** tutulur (her karede bağlan/kopar yapılmaz; bağlantı 1-4 sn sürer).
+- Sadece **değişen** renk gönderilir; OpenRGB aynı rengi tekrarlasa bile BLE'ye tekrar yazılmaz.
+- Her bağlantıda bir kez statik mod (`A0 63 01 BE`) seçilir, sonra yalnızca renk kareleri (`A0 69 04 ...`) akar.
+- OpenRGB kapalıysa/kapanırsa köprü 3 sn aralıkla yeniden bağlanmayı dener; BLE hatasında 2 sn sonra tekrar dener.
+
+> [!NOTE]
+> Köprü çalışırken SP611E'nin tek bağlantısı köprüde olduğundan `sp611e color ...` veya web arayüzü
+> **başka bir süreçten** cihaza erişemez. `--idle-timeout` süresi dolunca bağlantı serbest bırakılır.
 
 ---
 

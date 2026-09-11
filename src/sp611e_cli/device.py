@@ -126,34 +126,42 @@ class SP611EController:
                         await self._write_frame(client, frame)
                         logger.info("Komut başarıyla iletildi: %s", frame.hex(' ').upper())
 
-            except BleakDeviceNotFoundError as exc:
-                logger.error("Cihaz bulunamadı: %s", self.mac_address)
-                raise SP611EDeviceNotFoundError(
-                    f"'{self.mac_address}' adresli cihaz kapsama alanında bulunamadı.\n"
-                    "Lütfen cihazın açık, menzil içinde ve Bluetooth'unuzun aktif olduğundan emin olun."
-                ) from exc
+            except (BleakDeviceNotFoundError, asyncio.TimeoutError, BleakError) as exc:
+                raise self._translate_connect_error(exc) from exc
 
-            except asyncio.TimeoutError as exc:
-                logger.error("Bağlantı zaman aşımı: %s", self.mac_address)
-                raise SP611EConnectionError(
-                    f"'{self.mac_address}' adresli cihaza bağlanırken zaman aşımı oluştu.\n"
-                    "Cihaz meşgul olabilir veya sinyal çok zayıf olabilir."
-                ) from exc
+    def session(self) -> "SP611ESession":
+        """Return a long-lived connection handle (see SP611ESession)."""
+        return SP611ESession(self)
 
-            except BleakError as exc:
-                logger.error("Bleak hatası (%s): %s", self.mac_address, exc)
-                err_msg = str(exc).lower()
-                if "not powered on" in err_msg or "powered_off" in err_msg:
-                    raise SP611EConnectionError(
-                        "Bilgisayarınızın Bluetooth'u kapalı görünüyor.\n"
-                        "Lütfen Bluetooth'u açın ve tekrar deneyin."
-                    ) from exc
-                raise SP611EConnectionError(
-                    f"Cihaza bağlanılamadı ({exc}).\n\n"
-                    "ÖNEMLİ: SP611E aynı anda yalnızca TEK BİR Bluetooth bağlantısını destekler!\n"
-                    "Eğer telefonunuzda BanlanX uygulaması açıksa veya cihaza başka bir telefon/bilgisayar "
-                    "bağlıysa, lütfen o bağlantıyı kapatıp tekrar deneyin."
-                ) from exc
+    def _translate_connect_error(self, exc: BaseException) -> SP611EError:
+        """Map Bleak/asyncio connection failures to user-facing SP611E exceptions."""
+        if isinstance(exc, BleakDeviceNotFoundError):
+            logger.error("Cihaz bulunamadı: %s", self.mac_address)
+            return SP611EDeviceNotFoundError(
+                f"'{self.mac_address}' adresli cihaz kapsama alanında bulunamadı.\n"
+                "Lütfen cihazın açık, menzil içinde ve Bluetooth'unuzun aktif olduğundan emin olun."
+            )
+
+        if isinstance(exc, asyncio.TimeoutError):
+            logger.error("Bağlantı zaman aşımı: %s", self.mac_address)
+            return SP611EConnectionError(
+                f"'{self.mac_address}' adresli cihaza bağlanırken zaman aşımı oluştu.\n"
+                "Cihaz meşgul olabilir veya sinyal çok zayıf olabilir."
+            )
+
+        logger.error("Bleak hatası (%s): %s", self.mac_address, exc)
+        err_msg = str(exc).lower()
+        if "not powered on" in err_msg or "powered_off" in err_msg:
+            return SP611EConnectionError(
+                "Bilgisayarınızın Bluetooth'u kapalı görünüyor.\n"
+                "Lütfen Bluetooth'u açın ve tekrar deneyin."
+            )
+        return SP611EConnectionError(
+            f"Cihaza bağlanılamadı ({exc}).\n\n"
+            "ÖNEMLİ: SP611E aynı anda yalnızca TEK BİR Bluetooth bağlantısını destekler!\n"
+            "Eğer telefonunuzda BanlanX uygulaması açıksa veya cihaza başka bir telefon/bilgisayar "
+            "bağlıysa, lütfen o bağlantıyı kapatıp tekrar deneyin."
+        )
 
     @staticmethod
     async def _write_frame(client: BleakClient, frame: bytes) -> None:
@@ -168,6 +176,105 @@ class SP611EController:
             except Exception as fallback_err:
                 logger.error("Komut yazma hatası: %s", fallback_err)
                 raise SP611ECommandError(f"Komut gönderilemedi: {fallback_err}") from write_err
+
+
+class SP611ESession:
+    """A long-lived BLE connection for streaming many frames over time.
+
+    send_commands() connects and disconnects per call, which costs 1-4 seconds
+    on this controller. Sync/mirroring use cases (e.g. the OpenRGB bridge) need
+    to push a color several times per second, so this handle keeps the
+    connection open between writes. The BLE lock is held for the whole lifetime
+    of the connection: the SP611E accepts a single connection, so other callers
+    in this process queue until disconnect() releases it.
+
+    Usage:
+        async with controller.session() as session:
+            await session.write_many(frames)
+    """
+
+    def __init__(self, controller: SP611EController) -> None:
+        self._controller = controller
+        self._client: Optional[BleakClient] = None
+        self._lock: Optional[asyncio.Lock] = None
+
+    @property
+    def connected(self) -> bool:
+        """True while the underlying BleakClient reports an active connection."""
+        return self._client is not None and bool(self._client.is_connected)
+
+    async def __aenter__(self) -> "SP611ESession":
+        await self.connect()
+        return self
+
+    async def __aexit__(self, *exc) -> None:
+        await self.disconnect()
+
+    async def connect(self) -> None:
+        """Acquire the BLE lock and open the connection (no-op if already connected)."""
+        if self._client is not None:
+            if self._client.is_connected:
+                return
+            # Device dropped the link on its side; clean up before reconnecting.
+            await self.disconnect()
+
+        mac = self._controller.mac_address
+        lock = _get_ble_lock()
+        await lock.acquire()
+        self._lock = lock
+        logger.info("Kalıcı BLE oturumu açılıyor: %s (Timeout: %ss)", mac, self._controller.timeout)
+        client = BleakClient(mac, timeout=self._controller.timeout)
+        try:
+            await client.connect()
+        except (BleakDeviceNotFoundError, asyncio.TimeoutError, BleakError) as exc:
+            self._release_lock()
+            raise self._controller._translate_connect_error(exc) from exc
+        except BaseException:
+            self._release_lock()
+            raise
+        self._client = client
+        logger.info("BLE bağlantısı kuruldu -> %s", mac)
+
+    async def write(self, frame: bytes) -> None:
+        """Write one frame over the open connection.
+
+        Raises:
+            SP611EConnectionError: If the session is not connected (or the link dropped).
+            SP611ECommandError: If the GATT write fails.
+        """
+        if not self.connected:
+            raise SP611EConnectionError(
+                f"'{self._controller.mac_address}' ile aktif bir BLE oturumu yok (bağlantı kopmuş olabilir)."
+            )
+        frame = bytes(frame)
+        logger.debug("Gönderilecek veri (Hex): %s (Uzunluk: %d byte)", frame.hex(' ').upper(), len(frame))
+        await SP611EController._write_frame(self._client, frame)  # type: ignore[arg-type]
+
+    async def write_many(self, frames: Iterable[bytes]) -> None:
+        """Write frames in order, pausing INTER_FRAME_DELAY between them."""
+        for index, frame in enumerate(frames):
+            if index > 0:
+                await asyncio.sleep(INTER_FRAME_DELAY)
+            await self.write(frame)
+
+    async def disconnect(self) -> None:
+        """Close the connection and release the BLE lock (safe to call repeatedly)."""
+        client, self._client = self._client, None
+        if client is None:
+            self._release_lock()
+            return
+        try:
+            await client.disconnect()
+            logger.info("BLE oturumu kapatıldı -> %s", self._controller.mac_address)
+        except Exception as exc:  # disconnect errors are not actionable for callers
+            logger.warning("BLE oturumu kapatılırken hata yok sayıldı: %s", exc)
+        finally:
+            self._release_lock()
+
+    def _release_lock(self) -> None:
+        lock, self._lock = self._lock, None
+        if lock is not None and lock.locked():
+            lock.release()
 
 
 async def scan_devices(timeout: float = 5.0) -> List[DiscoveredDevice]:

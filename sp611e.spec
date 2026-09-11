@@ -19,7 +19,8 @@ a = Analysis(
     binaries=[],
     datas=[("src/sp611e_cli/web", "sp611e_cli/web")],
     # bleak picks its backend at runtime; make sure the WinRT backend is bundled.
-    hiddenimports=collect_submodules("bleak") + collect_submodules("winrt"),
+    # openrgb-python is imported lazily inside the `openrgb` command; include it explicitly.
+    hiddenimports=collect_submodules("bleak") + collect_submodules("winrt") + collect_submodules("openrgb"),
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
